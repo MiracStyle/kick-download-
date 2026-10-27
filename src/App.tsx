@@ -27,6 +27,8 @@ import { FaqView } from './components/FaqView';
 import { Footer } from './components/Footer';
 import { QrCodeModal } from './components/QrCodeModal';
 import { VodDownloader } from './components/VodDownloader';
+import { CookieBanner } from './components/CookieBanner';
+import { LegalModal } from './components/LegalModal';
 import { ClipData, HistoryItem, QueueItem } from './types';
 
 const STORAGE_KEY_HISTORY = 'kick_clips_history_v2';
@@ -70,6 +72,15 @@ export default function App() {
 
   // QR Modal
   const [isQrOpen, setIsQrOpen] = useState<boolean>(false);
+
+  // Legal & DMCA Modal
+  const [isLegalOpen, setIsLegalOpen] = useState<boolean>(false);
+  const [legalTab, setLegalTab] = useState<'disclaimer' | 'dmca' | 'terms' | 'privacy'>('disclaimer');
+
+  const handleOpenLegal = (tab: 'disclaimer' | 'dmca' | 'terms' | 'privacy' = 'disclaimer') => {
+    setLegalTab(tab);
+    setIsLegalOpen(true);
+  };
 
   // Trending / Explore
   const [trendingClips, setTrendingClips] = useState<any[]>([]);
@@ -630,7 +641,17 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <Footer />
+      <Footer onOpenLegal={handleOpenLegal} />
+
+      {/* Cookie Banner */}
+      <CookieBanner onOpenLegal={handleOpenLegal} />
+
+      {/* Legal & DMCA Modal */}
+      <LegalModal
+        isOpen={isLegalOpen}
+        onClose={() => setIsLegalOpen(false)}
+        defaultTab={legalTab}
+      />
 
       {/* QR Code Modal for Phone Downloading */}
       {currentClip && (
