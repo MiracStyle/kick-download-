@@ -612,7 +612,7 @@ app.get('/api/clip/download', async (req: Request, res: Response) => {
     const mode = ((req.query.mode as string) || '').toLowerCase();
     const isEditMode = mode === 'edit' || req.query.edit === 'true' || req.query.edit === '1';
 
-    let ffmpegCmd = `ffmpeg -y -fflags +genpts+discardcorrupt `;
+    let ffmpegCmd = `ffmpeg -y -fflags +genpts+discardcorrupt -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -headers "Referer: https://kick.com/\r\n" -rw_timeout 15000000 `;
 
     // Fast input seek if startSec > 0
     if (startSec !== null && !isNaN(startSec) && startSec > 0) {
@@ -735,11 +735,14 @@ app.get('/api/clip/download', async (req: Request, res: Response) => {
     }
 
     exec(ffmpegCmd, (err) => {
-      if (err || !fs.existsSync(tempFilePath)) {
-        console.error('FFmpeg transcode error:', err);
+      const fileExists = fs.existsSync(tempFilePath);
+      const fileSize = fileExists ? fs.statSync(tempFilePath).size : 0;
+
+      if (err || !fileExists || fileSize < 50000) {
+        console.error('FFmpeg transcode error or truncated file (size:', fileSize, 'bytes):', err);
         cleanup();
         if (!res.headersSent) {
-          return res.status(500).json({ error: 'Klip dönüştürülürken bir hata oluştu.' });
+          return res.status(500).json({ error: 'Klip indirilemedi veya dosya eksik işlendi. Lütfen tekrar deneyin.' });
         }
         return;
       }
@@ -905,7 +908,7 @@ app.get('/api/vod/download', async (req: Request, res: Response) => {
     const mode = ((req.query.mode as string) || '').toLowerCase();
     const isEditMode = mode === 'edit' || req.query.edit === 'true' || req.query.edit === '1';
 
-    let ffmpegCmd = `ffmpeg -y -fflags +genpts+discardcorrupt `;
+    let ffmpegCmd = `ffmpeg -y -fflags +genpts+discardcorrupt -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -headers "Referer: https://kick.com/\r\n" -rw_timeout 15000000 `;
 
     // Fast input seek if startSec > 0
     if (startSec > 0) {
@@ -957,11 +960,14 @@ app.get('/api/vod/download', async (req: Request, res: Response) => {
 
     // Generous timeout for VOD downloading
     exec(ffmpegCmd, { timeout: 600000 }, (err) => {
-      if (err || !fs.existsSync(tempFilePath)) {
-        console.error('VOD FFmpeg transcode error:', err);
+      const fileExists = fs.existsSync(tempFilePath);
+      const fileSize = fileExists ? fs.statSync(tempFilePath).size : 0;
+
+      if (err || !fileExists || fileSize < 50000) {
+        console.error('VOD FFmpeg transcode error or truncated file (size:', fileSize, 'bytes):', err);
         cleanup();
         if (!res.headersSent) {
-          return res.status(500).json({ error: 'Yayın indirilirken bir hata oluştu. Lütfen bağlantıyı kontrol edin.' });
+          return res.status(500).json({ error: 'Yayın indirilirken bir hata oluştu veya dosya eksik işlendi. Lütfen tekrar deneyin.' });
         }
         return;
       }

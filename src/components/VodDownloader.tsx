@@ -53,12 +53,21 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
   // Download states
   const [selectedQuality, setSelectedQuality] = useState<string>('1080p');
   const [selectedFormat, setSelectedFormat] = useState<'mp4' | 'webm' | 'avi' | 'mkv' | 'mp3' | 'm4a'>('mp4');
-  const [isEditOptimized, setIsEditOptimized] = useState<boolean>(false);
+  const [isEditOptimized, setIsEditOptimized] = useState<boolean>(true);
+  const [showEditWarningModal, setShowEditWarningModal] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [downloadProgressText, setDownloadProgressText] = useState<string>('');
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
+
+  const handleToggleEditOptimized = () => {
+    if (isEditOptimized) {
+      setShowEditWarningModal(true);
+    } else {
+      setIsEditOptimized(true);
+    }
+  };
 
   // Segment inputs (in seconds)
   const [segmentStart, setSegmentStart] = useState<string>('00:00:00');
@@ -417,6 +426,10 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
         blob = await response.blob();
       }
 
+      if (blob.size < 50000) {
+        throw new Error('İndirilen yayın dosyası eksik veya bağlantı kesildi. Lütfen tekrar deneyin.');
+      }
+
       setDownloadProgress(100);
       setDownloadProgressText('3/3: Tamamlandı! Yayın cihazınıza kaydedildi.');
 
@@ -708,19 +721,75 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
                 </div>
               </div>
 
-              <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
-                <input
-                  type="checkbox"
-                  checked={isEditOptimized}
-                  onChange={(e) => setIsEditOptimized(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#53fc18]"></div>
+              <button
+                type="button"
+                onClick={handleToggleEditOptimized}
+                className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center group"
+              >
+                <div className={`w-11 h-6 rounded-full transition-colors relative ${isEditOptimized ? 'bg-[#53fc18]' : 'bg-slate-800'}`}>
+                  <div className={`absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform ${isEditOptimized ? 'translate-x-5' : 'translate-x-0'}`} />
+                </div>
                 <span className="ml-2.5 text-xs font-bold text-white whitespace-nowrap">
-                  {isEditOptimized ? 'AÇIK (Kurgu Uyumlu)' : 'KAPALI (Standart)'}
+                  {isEditOptimized ? 'AÇIK (Kurgu Uyumlu)' : 'KAPALI (Riski Kabul Et)'}
                 </span>
-              </label>
+              </button>
             </div>
+
+            {/* Warning Modal when turning OFF edit mode */}
+            {showEditWarningModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                <div className="relative w-full max-w-md bg-[#121824] border border-amber-500/40 rounded-3xl p-6 shadow-2xl space-y-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-white">
+                        ⚠️ Montaj Modunu Kapatıyorsunuz!
+                      </h3>
+                      <span className="text-[11px] font-bold text-amber-400">
+                        Kurgu Programlarında Donma Yaşanabilir
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 text-xs text-slate-300 leading-relaxed bg-black/40 p-4 rounded-2xl border border-white/5">
+                    <p>
+                      Bu ayarı kapattığınızda indirilen ham Kick videoları <strong>CapCut, Adobe Premiere Pro, DaVinci Resolve veya Sony Vegas</strong> gibi programlarda video barını (timeline) sararken <strong>dona kalabilir veya kilitlenebilir.</strong>
+                    </p>
+                    <p className="text-amber-300 font-semibold flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>Eğer videoyu YouTube'a yükleyecek veya kurgulayacaksanız AÇIK tutmanız önerilir.</span>
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditOptimized(true);
+                        setShowEditWarningModal(false);
+                      }}
+                      className="w-full py-3 px-4 rounded-xl bg-[#53fc18] hover:bg-[#46d614] text-black font-extrabold text-xs shadow-lg shadow-[#53fc18]/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Montaj Modunu AÇIK Tut (Önerilen)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditOptimized(false);
+                        setShowEditWarningModal(false);
+                      }}
+                      className="w-full py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Yine de Kapat (Riskli / Sadece Düz İzleme)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Mode Tabs */}
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-4">
