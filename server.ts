@@ -509,8 +509,8 @@ app.get('/api/clip/stream', async (req: Request, res: Response) => {
       return res.sendFile(cachedFilePath);
     }
 
-    // Otherwise transcode quickly using ffmpeg -c copy (takes ~0.8s) and then serve
-    exec(`ffmpeg -y -i "${videoUrl}" -c copy -movflags +faststart "${cachedFilePath}"`, (err) => {
+    // Otherwise transcode quickly using ffmpeg -c copy with timestamp fix and then serve
+    exec(`ffmpeg -y -fflags +genpts+discardcorrupt -i "${videoUrl}" -c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero -movflags +faststart "${cachedFilePath}"`, (err) => {
       if (err || !fs.existsSync(cachedFilePath)) {
         console.error('Stream transcode error:', err);
         return res.status(500).send('Video akışı hazırlanamadı.');
@@ -609,21 +609,26 @@ app.get('/api/clip/download', async (req: Request, res: Response) => {
     const tempFilePath = path.join(os.tmpdir(), `kick_dl_${uniqueId}.${ext}`);
     tmpFilesToClean.push(tempFilePath);
 
-    let ffmpegCmd = `ffmpeg -y `;
+    const mode = ((req.query.mode as string) || '').toLowerCase();
+    const isEditMode = mode === 'edit' || req.query.edit === 'true' || req.query.edit === '1';
 
-    // Trim params
+    let ffmpegCmd = `ffmpeg -y -fflags +genpts+discardcorrupt `;
+
+    // Fast input seek if startSec > 0
     if (startSec !== null && !isNaN(startSec) && startSec > 0) {
       ffmpegCmd += `-ss ${startSec} `;
     }
+
+    ffmpegCmd += `-i "${videoUrl}" `;
+
+    // Output duration trimming (MUST be after -i)
     if (endSec !== null && !isNaN(endSec) && endSec > 0) {
-      if (startSec !== null && !isNaN(startSec)) {
-        ffmpegCmd += `-to ${endSec} `;
+      if (startSec !== null && !isNaN(startSec) && startSec > 0) {
+        ffmpegCmd += `-t ${endSec - startSec} `;
       } else {
         ffmpegCmd += `-t ${endSec} `;
       }
     }
-
-    ffmpegCmd += `-i "${videoUrl}" `;
 
     if (format === 'mp3') {
       const audioBitrate = customBitrate || (quality === '64k' ? '64k' : quality === '128k' ? '128k' : quality === '320k' ? '320k' : '192k');
@@ -697,30 +702,35 @@ app.get('/api/clip/download', async (req: Request, res: Response) => {
 
       ffmpegCmd += `${scaleFilter} -c:v mpeg4 -qscale:v ${qscale} -c:a libmp3lame -b:a ${audioBitrate} "${tempFilePath}"`;
     } else if (format === 'mkv') {
-      if (quality === '1080p' && !customBitrate && (!startSec || startSec <= 0) && (!endSec || endSec <= 0)) {
-        ffmpegCmd += `-c copy "${tempFilePath}"`;
+      if (isEditMode) {
+        ffmpegCmd += `-c:v libx264 -preset superfast -g 60 -keyint_min 30 -crf 20 -c:a aac -b:a 192k -avoid_negative_ts make_zero "${tempFilePath}"`;
+      } else if (quality === '1080p' && !customBitrate && (!startSec || startSec <= 0) && (!endSec || endSec <= 0)) {
+        ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero "${tempFilePath}"`;
       } else {
         const height = quality === '720p' || quality === '720p_eco' ? 720 : quality === '480p' ? 480 : quality === '360p' ? 360 : quality === '240p' ? 240 : 1080;
-        ffmpegCmd += `-vf scale=-2:${height} -c:v libx264 -preset veryfast -crf 24 -c:a aac -b:a 128k "${tempFilePath}"`;
+        ffmpegCmd += `-vf scale=-2:${height} -c:v libx264 -preset superfast -crf 22 -c:a aac -b:a 128k -avoid_negative_ts make_zero "${tempFilePath}"`;
       }
     } else {
       // Default: MP4 (H.264 / AAC)
-      if (quality === '1080p' && !customBitrate && (!startSec || startSec <= 0) && (!endSec || endSec <= 0)) {
-        ffmpegCmd += `-c copy -movflags +faststart "${tempFilePath}"`;
+      if (isEditMode) {
+        // Full keyframe re-indexing (GOP=60) for 100% smooth timeline scrubbing in CapCut, Premiere Pro, DaVinci Resolve
+        ffmpegCmd += `-c:v libx264 -preset superfast -g 60 -keyint_min 30 -crf 20 -c:a aac -b:a 192k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
+      } else if (quality === '1080p' && !customBitrate && (!startSec || startSec <= 0) && (!endSec || endSec <= 0)) {
+        ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else if (quality === '1080p') {
-        ffmpegCmd += `-c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 192k -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-c:v libx264 -preset superfast -crf 20 -c:a aac -b:a 192k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else if (quality === '720p') {
-        ffmpegCmd += `-vf scale=-2:720 -c:v libx264 -preset veryfast ${customBitrate ? `-b:v ${customBitrate}` : '-crf 22'} -c:a aac -b:a 160k -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-vf scale=-2:720 -c:v libx264 -preset superfast ${customBitrate ? `-b:v ${customBitrate}` : '-crf 22'} -c:a aac -b:a 160k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else if (quality === '720p_eco') {
-        ffmpegCmd += `-vf scale=-2:720 -c:v libx264 -preset veryfast -b:v 1200k -maxrate 1500k -bufsize 2400k -c:a aac -b:a 96k -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-vf scale=-2:720 -c:v libx264 -preset superfast -b:v 1200k -maxrate 1500k -bufsize 2400k -c:a aac -b:a 96k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else if (quality === '480p') {
-        ffmpegCmd += `-vf scale=-2:480 -c:v libx264 -preset veryfast ${customBitrate ? `-b:v ${customBitrate}` : '-b:v 800k -maxrate 1000k -bufsize 1600k'} -c:a aac -b:a 96k -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-vf scale=-2:480 -c:v libx264 -preset superfast ${customBitrate ? `-b:v ${customBitrate}` : '-b:v 800k -maxrate 1000k -bufsize 1600k'} -c:a aac -b:a 96k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else if (quality === '360p') {
-        ffmpegCmd += `-vf scale=-2:360 -c:v libx264 -preset veryfast -b:v 450k -maxrate 600k -bufsize 900k -c:a aac -b:a 64k -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-vf scale=-2:360 -c:v libx264 -preset superfast -b:v 450k -maxrate 600k -bufsize 900k -c:a aac -b:a 64k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else if (quality === '240p') {
-        ffmpegCmd += `-vf scale=-2:240 -c:v libx264 -preset veryfast -b:v 200k -maxrate 300k -bufsize 500k -c:a aac -b:a 48k -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-vf scale=-2:240 -c:v libx264 -preset superfast -b:v 200k -maxrate 300k -bufsize 500k -c:a aac -b:a 48k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       } else {
-        ffmpegCmd += `-c copy -movflags +faststart "${tempFilePath}"`;
+        ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
       }
     }
 
@@ -892,19 +902,24 @@ app.get('/api/vod/download', async (req: Request, res: Response) => {
     const tempFilePath = path.join(os.tmpdir(), `kick_vod_${uniqueId}.${ext}`);
     tmpFilesToClean.push(tempFilePath);
 
-    let ffmpegCmd = `ffmpeg -y `;
+    const mode = ((req.query.mode as string) || '').toLowerCase();
+    const isEditMode = mode === 'edit' || req.query.edit === 'true' || req.query.edit === '1';
 
+    let ffmpegCmd = `ffmpeg -y -fflags +genpts+discardcorrupt `;
+
+    // Fast input seek if startSec > 0
     if (startSec > 0) {
       ffmpegCmd += `-ss ${startSec} `;
     }
 
+    ffmpegCmd += `-i "${streamUrlToDownload}" `;
+
+    // Output duration trimming (MUST be after -i)
     if (durationSec && durationSec > 0) {
       ffmpegCmd += `-t ${durationSec} `;
     } else if (endSec && endSec > startSec) {
       ffmpegCmd += `-t ${endSec - startSec} `;
     }
-
-    ffmpegCmd += `-i "${streamUrlToDownload}" `;
 
     if (format === 'mp3') {
       const audioBitrate = customBitrate || (quality === '64k' ? '64k' : quality === '128k' ? '128k' : quality === '320k' ? '320k' : '192k');
@@ -923,14 +938,21 @@ app.get('/api/vod/download', async (req: Request, res: Response) => {
       const scaleArg = quality === '240p' ? '-vf scale=-2:240' : '';
       ffmpegCmd += `${scaleArg} -c:v mpeg4 -qscale:v ${qscale} -c:a libmp3lame -b:a 160k "${tempFilePath}"`;
     } else if (format === 'mkv') {
-      ffmpegCmd += `-c copy "${tempFilePath}"`;
+      if (isEditMode) {
+        ffmpegCmd += `-c:v libx264 -preset superfast -g 60 -keyint_min 30 -crf 20 -c:a aac -b:a 192k -avoid_negative_ts make_zero "${tempFilePath}"`;
+      } else {
+        ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero "${tempFilePath}"`;
+      }
+    } else if (isEditMode) {
+      // Re-encode with frequent keyframes (GOP=60, 1 sec) for 100% smooth seeking in CapCut / Premiere / DaVinci
+      ffmpegCmd += `-c:v libx264 -preset superfast -g 60 -keyint_min 30 -crf 20 -c:a aac -b:a 192k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
     } else if (quality === '240p') {
-      ffmpegCmd += `-vf scale=-2:240 -c:v libx264 -preset veryfast -b:v 200k -maxrate 300k -bufsize 500k -c:a aac -b:a 48k -movflags +faststart "${tempFilePath}"`;
+      ffmpegCmd += `-vf scale=-2:240 -c:v libx264 -preset superfast -b:v 200k -maxrate 300k -bufsize 500k -c:a aac -b:a 48k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
     } else if (quality === '720p_eco') {
-      ffmpegCmd += `-c:v libx264 -preset veryfast -b:v 1200k -maxrate 1500k -bufsize 2400k -c:a aac -b:a 96k -movflags +faststart "${tempFilePath}"`;
+      ffmpegCmd += `-c:v libx264 -preset superfast -b:v 1200k -maxrate 1500k -bufsize 2400k -c:a aac -b:a 96k -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
     } else {
-      // Direct stream copy for high speed on multi-hour streams
-      ffmpegCmd += `-c copy -movflags +faststart "${tempFilePath}"`;
+      // Direct stream copy with automatic timestamp zeroing & AAC bitstream conversion for smooth seeking
+      ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
     }
 
     // Generous timeout for VOD downloading

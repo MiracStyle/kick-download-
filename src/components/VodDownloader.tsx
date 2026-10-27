@@ -53,6 +53,7 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
   // Download states
   const [selectedQuality, setSelectedQuality] = useState<string>('1080p');
   const [selectedFormat, setSelectedFormat] = useState<'mp4' | 'webm' | 'avi' | 'mkv' | 'mp3' | 'm4a'>('mp4');
+  const [isEditOptimized, setIsEditOptimized] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [downloadProgressText, setDownloadProgressText] = useState<string>('');
@@ -335,13 +336,8 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
 
     try {
       const startSec = activeMode === 'segment' ? parseTimeToSeconds(segmentStart) : 0;
-      const endSec =
-        activeMode === 'segment'
-          ? parseTimeToSeconds(segmentEnd)
-          : selectedVod.duration > 0
-          ? selectedVod.duration
-          : 0;
-      const durationSec = endSec > startSec ? endSec - startSec : 0;
+      const endSec = activeMode === 'segment' ? parseTimeToSeconds(segmentEnd) : 0;
+      const durationSec = activeMode === 'segment' && endSec > startSec ? endSec - startSec : 0;
 
       const params = new URLSearchParams({
         url: selectedVod.source,
@@ -351,6 +347,7 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
         quality: selectedQuality,
       });
 
+      if (isEditOptimized) params.set('edit', 'true');
       if (startSec > 0) params.set('start', startSec.toString());
       if (durationSec > 0) params.set('duration', durationSec.toString());
 
@@ -465,13 +462,8 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
   const getDirectDownloadHref = (): string => {
     if (!selectedVod) return '';
     const startSec = activeMode === 'segment' ? parseTimeToSeconds(segmentStart) : 0;
-    const endSec =
-      activeMode === 'segment'
-        ? parseTimeToSeconds(segmentEnd)
-        : selectedVod.duration > 0
-        ? selectedVod.duration
-        : 0;
-    const durationSec = endSec > startSec ? endSec - startSec : 0;
+    const endSec = activeMode === 'segment' ? parseTimeToSeconds(segmentEnd) : 0;
+    const durationSec = activeMode === 'segment' && endSec > startSec ? endSec - startSec : 0;
 
     const params = new URLSearchParams({
       url: selectedVod.source,
@@ -481,6 +473,7 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
       quality: selectedQuality,
     });
 
+    if (isEditOptimized) params.set('edit', 'true');
     if (startSec > 0) params.set('start', startSec.toString());
     if (durationSec > 0) params.set('duration', durationSec.toString());
 
@@ -694,6 +687,41 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
 
           {/* Download Options Section */}
           <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-6 backdrop-blur-md space-y-6">
+            {/* CapCut / Premiere / DaVinci Timeline Scrubbing Fix Card */}
+            <div className="bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-black/60 border border-purple-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0 mt-0.5">
+                  <Scissors className="w-5 h-5 text-purple-400" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-xs sm:text-sm font-black text-white">
+                      Montaj & Edit Programı Uyumlu Mod (CapCut, Premiere Pro, DaVinci Resolve)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-extrabold border border-purple-500/40">
+                      Timeline Donma Çözümü
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    İndirilen videoları montaj programına attığınızda video sarma barında (timeline) dona kalmasını önler. Saniyede 1 keyframe indeksleyerek kurgu programlarında takılmadan kaymak gibi akıcı düzenleme yapmanızı sağlar.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+                <input
+                  type="checkbox"
+                  checked={isEditOptimized}
+                  onChange={(e) => setIsEditOptimized(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#53fc18]"></div>
+                <span className="ml-2.5 text-xs font-bold text-white whitespace-nowrap">
+                  {isEditOptimized ? 'AÇIK (Kurgu Uyumlu)' : 'KAPALI (Standart)'}
+                </span>
+              </label>
+            </div>
+
             {/* Mode Tabs */}
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-4">
               <button

@@ -55,6 +55,7 @@ export const DownloadOptions: React.FC<DownloadOptionsProps> = ({
 }) => {
   const [selectedFormat, setSelectedFormat] = useState<DownloadFormat>('mp4');
   const [selectedQuality, setSelectedQuality] = useState<string>('1080p');
+  const [isEditOptimized, setIsEditOptimized] = useState<boolean>(false);
   const [customBitrate, setCustomBitrate] = useState<string>('');
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
@@ -208,6 +209,9 @@ export const DownloadOptions: React.FC<DownloadOptionsProps> = ({
       quality: selectedQuality,
     });
 
+    if (isEditOptimized) {
+      params.set('edit', 'true');
+    }
     if (activeBitrate) {
       params.set('bitrate', activeBitrate);
     }
@@ -474,6 +478,41 @@ export const DownloadOptions: React.FC<DownloadOptionsProps> = ({
             <span className="hidden sm:inline">Telefonda İndir</span>
           </button>
         </div>
+      </div>
+
+      {/* CapCut / Premiere / DaVinci Timeline Scrubbing Fix Card */}
+      <div className="bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-black/60 border border-purple-500/30 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <div className="p-2 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0 mt-0.5">
+            <Sliders className="w-4 h-4 text-purple-400" />
+          </div>
+          <div className="space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-xs font-black text-white">
+                Montaj & Edit Programı Uyumlu Mod (CapCut, Premiere, DaVinci)
+              </h4>
+              <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[9px] font-extrabold border border-purple-500/40">
+                Donmayan Timeline
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Video barında (timeline) sararken dona kalmayı önler. Saniyede 1 keyframe yerleştirerek montaj yazılımlarında kaymak gibi akıcı kurgu yapmanızı sağlar.
+            </p>
+          </div>
+        </div>
+
+        <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+          <input
+            type="checkbox"
+            checked={isEditOptimized}
+            onChange={(e) => setIsEditOptimized(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="w-10 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#53fc18]"></div>
+          <span className="ml-2 text-xs font-bold text-white whitespace-nowrap">
+            {isEditOptimized ? 'AÇIK (Montaj)' : 'KAPALI'}
+          </span>
+        </label>
       </div>
 
       {/* 1. Format Selection Tabs (MP4, WebM, AVI, MKV, MP3, M4A) */}
