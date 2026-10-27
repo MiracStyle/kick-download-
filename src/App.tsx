@@ -33,7 +33,7 @@ const STORAGE_KEY_HISTORY = 'kick_clips_history_v2';
 const STORAGE_KEY_QUEUE = 'kick_clips_queue_v2';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'downloader' | 'vod' | 'queue' | 'history' | 'explore' | 'faq'>('downloader');
+  const [activeTab, setActiveTab] = useState<'vod' | 'downloader' | 'queue' | 'history' | 'explore' | 'faq'>('vod');
   const [urlInput, setUrlInput] = useState<string>('');
   const [isLoadingClip, setIsLoadingClip] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -314,12 +314,6 @@ export default function App() {
     showToast('Tüm kuyruk indirmeleri başlatıldı!', 'success');
   };
 
-  const samplePresets = [
-    { label: '🇹🇷 Elraenn Klibi', url: 'https://kick.com/elraenn?clip=clip_01HS1SGXRYH71MFA2WX1HKF86E' },
-    { label: '🌍 xQc Klibi', url: 'https://kick.com/xqc?clip=clip_01H811MXG4FBR62FXPE1AXABDH' },
-    { label: '🎮 Westcol Klibi', url: 'https://kick.com/westcol?clip=clip_01HQV5M3D8B0QW1Z0J8R9X2Y' },
-  ];
-
   return (
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans selection:bg-[#53fc18] selection:text-black">
       {/* Navigation Header */}
@@ -435,26 +429,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Preset Chips */}
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-[#53fc18]" />
-                    Hızlı Test Klipleri:
-                  </span>
-                  {samplePresets.map((sp, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setUrlInput(sp.url);
-                        handleFetchClip(sp.url);
-                      }}
-                      className="px-3 py-1 rounded-lg bg-[#151c28] hover:bg-[#1e283a] text-slate-300 hover:text-white border border-white/5 hover:border-[#53fc18]/40 transition-all font-medium cursor-pointer"
-                    >
-                      {sp.label}
-                    </button>
-                  ))}
-                </div>
               </form>
 
               {/* Feature Badges Grid */}

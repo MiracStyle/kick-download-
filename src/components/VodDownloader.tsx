@@ -22,7 +22,6 @@ import {
   ShieldCheck,
   Tv,
   ArrowLeft,
-  Flame,
   Gauge,
   Layers,
   HardDrive,
@@ -63,14 +62,6 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
   // Segment inputs (in seconds)
   const [segmentStart, setSegmentStart] = useState<string>('00:00:00');
   const [segmentEnd, setSegmentEnd] = useState<string>('00:30:00');
-
-  // Streamer presets
-  const streamerPresets = [
-    { name: 'xQc (Yayın Arşivi)', slug: 'xqc', badge: 'Global VOD' },
-    { name: 'Elraenn (Kanal & Canlı)', slug: 'elraenn', badge: 'TR Top' },
-    { name: 'Adin Ross (Geçmiş Yayınlar)', slug: 'adinross', badge: 'Popüler' },
-    { name: 'Westcol', slug: 'westcol', badge: 'Canlı' },
-  ];
 
   // Load initial VOD or channel if provided
   useEffect(() => {
@@ -503,9 +494,23 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
         <div className="absolute top-0 right-0 w-96 h-96 bg-[#53fc18]/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
 
         <div className="relative z-10 max-w-3xl space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#53fc18]/20 border border-[#53fc18]/40 text-[#53fc18] text-xs font-bold uppercase tracking-wider">
-            <Radio className="w-3.5 h-3.5 animate-pulse" />
-            Yeni Özellik: Tam Yayın (VOD) İndirici
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#53fc18]/20 border border-[#53fc18]/40 text-[#53fc18] text-xs font-extrabold uppercase tracking-wider">
+              <Radio className="w-3.5 h-3.5 animate-pulse" />
+              <span>Ana Özellik: Kick Yayın (VOD) İndirici</span>
+            </div>
+
+            {onNavigateToClips && (
+              <button
+                type="button"
+                onClick={() => onNavigateToClips()}
+                className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-slate-300 hover:text-white text-xs font-semibold transition-all cursor-pointer group"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Klip İndirici (İkincil Özellik)</span>
+                <span className="text-[#53fc18] group-hover:translate-x-0.5 transition-transform font-bold">→</span>
+              </button>
+            )}
           </div>
 
           <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
@@ -555,27 +560,6 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
               </button>
             </div>
           </form>
-
-          {/* Quick Streamer Presets */}
-          <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-            <span className="text-slate-400 font-semibold flex items-center gap-1">
-              <Flame className="w-3.5 h-3.5 text-amber-400" />
-              Popüler Yayıncılar:
-            </span>
-            {streamerPresets.map((preset) => (
-              <button
-                key={preset.slug}
-                onClick={() => {
-                  setSearchInput(preset.slug);
-                  handleSearch(preset.slug);
-                }}
-                className="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/5 hover:border-[#53fc18]/40 transition-all flex items-center gap-1.5"
-              >
-                <span>{preset.name}</span>
-                <span className="text-[10px] text-[#53fc18] font-bold">({preset.badge})</span>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 

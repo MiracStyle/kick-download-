@@ -19,8 +19,8 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
         {/* Brand */}
         <button
-          onClick={() => setActiveTab('downloader')}
-          className="flex items-center gap-3 group text-left transition-transform active:scale-95"
+          onClick={() => setActiveTab('vod')}
+          className="flex items-center gap-3 group text-left transition-transform active:scale-95 cursor-pointer"
         >
           <div className="w-10 h-10 rounded-xl bg-[#53fc18] flex items-center justify-center font-black text-black text-xl tracking-tighter shadow-lg shadow-[#53fc18]/25 group-hover:scale-105 transition-all">
             K
@@ -28,70 +28,72 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-[#53fc18] transition-colors">
-                KICK <span className="text-[#53fc18]">İNDİRİCİ</span>
+                KICK <span className="text-[#53fc18]">YAYIN İNDİRİCİ</span>
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#53fc18]/15 text-[#53fc18] border border-[#53fc18]/30">
-                KLİP & YAYIN (VOD)
+                VOD & KLİP
               </span>
             </div>
             <p className="text-xs text-slate-400 hidden sm:block">
-              Filigransız 1080p HD Klip & Tam Yayın İndirici
+              1080p60 Full HD Tam Yayın (VOD) & Filigransız Klip İndirme
             </p>
           </div>
         </button>
 
         {/* Navigation Tabs */}
         <nav className="flex items-center gap-1 sm:gap-2">
+          {/* Main Primary Feature: Yayın (VOD) İndirici */}
+          <button
+            onClick={() => setActiveTab('vod')}
+            className={`relative flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+              activeTab === 'vod'
+                ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/25 ring-1 ring-[#53fc18]/50'
+                : 'text-slate-200 hover:text-white hover:bg-white/[0.08] bg-white/[0.03] border border-white/10'
+            }`}
+          >
+            <Radio className={`w-4 h-4 ${activeTab === 'vod' ? 'animate-pulse' : 'text-[#53fc18]'}`} />
+            <span>Yayın (VOD) İndirici</span>
+            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full ${
+              activeTab === 'vod' ? 'bg-black text-[#53fc18]' : 'bg-[#53fc18]/20 text-[#53fc18] border border-[#53fc18]/30'
+            }`}>
+              ANA
+            </span>
+          </button>
+
+          {/* Secondary Feature: Klip İndirici */}
           <button
             onClick={() => setActiveTab('downloader')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
               activeTab === 'downloader'
                 ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/20'
                 : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
             }`}
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4 h-4 text-emerald-400" />
             <span className="hidden md:inline">Klip İndirici</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('vod')}
-            className={`relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${
-              activeTab === 'vod'
-                ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/20'
-                : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
-            }`}
-          >
-            <Radio className="w-4 h-4" />
-            <span className="hidden md:inline">Tüm Yayın (VOD)</span>
-            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full ${
-              activeTab === 'vod' ? 'bg-black text-[#53fc18]' : 'bg-[#53fc18]/20 text-[#53fc18] border border-[#53fc18]/30'
-            }`}>
-              YENİ
-            </span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('explore')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
               activeTab === 'explore'
                 ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/20'
                 : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
             }`}
           >
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-4 h-4 text-amber-400" />
             <span className="hidden md:inline">Keşfet</span>
           </button>
 
           <button
             onClick={() => setActiveTab('queue')}
-            className={`relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
               activeTab === 'queue'
                 ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/20'
                 : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
             }`}
           >
-            <Layers className="w-4 h-4" />
+            <Layers className="w-4 h-4 text-cyan-400" />
             <span className="hidden md:inline">Kuyruk</span>
             {queueCount > 0 && (
               <span
@@ -106,13 +108,13 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => setActiveTab('history')}
-            className={`relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
               activeTab === 'history'
                 ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/20'
                 : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
             }`}
           >
-            <History className="w-4 h-4" />
+            <History className="w-4 h-4 text-slate-400" />
             <span className="hidden md:inline">Geçmiş</span>
             {historyCount > 0 && (
               <span
@@ -127,13 +129,13 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => setActiveTab('faq')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
               activeTab === 'faq'
                 ? 'bg-[#53fc18] text-black shadow-lg shadow-[#53fc18]/20'
                 : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
             }`}
           >
-            <HelpCircle className="w-4 h-4" />
+            <HelpCircle className="w-4 h-4 text-indigo-400" />
             <span className="hidden md:inline">Rehber & SSS</span>
           </button>
         </nav>

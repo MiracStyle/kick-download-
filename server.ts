@@ -1033,17 +1033,24 @@ app.get('/api/clip/trending', handleTrending);
 
 // Start Express Server
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.resolve(__dirname, 'dist');
+  const indexPath = path.resolve(distPath, 'index.html');
+  const hasDist = fs.existsSync(indexPath);
+
+  if (process.env.NODE_ENV === 'production' && hasDist) {
+    app.use(express.static(distPath));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(indexPath);
+    });
+  } else {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('⚠️ Uyarı: dist/index.html bulunamadı! Vite middleware moduna geçiliyor.');
+    }
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
-    });
   }
 
   app.listen(Number(PORT), '0.0.0.0', () => {
