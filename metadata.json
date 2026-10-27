@@ -1,0 +1,6 @@
+{
+  "name": "Kick Klip İndirici",
+  "description": "Kick.com yayıncı kliplerini filigransız, 1080p60 HD ve MP3 ses formatında anında indirin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
