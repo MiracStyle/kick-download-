@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Radio,
   Download,
@@ -56,10 +56,42 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
   const [isEditOptimized, setIsEditOptimized] = useState<boolean>(true);
   const [showEditWarningModal, setShowEditWarningModal] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobSpeed, setJobSpeed] = useState<string>('1x');
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [downloadProgressText, setDownloadProgressText] = useState<string>('');
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopPolling = () => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, []);
+
+  const handleCancelJob = async () => {
+    if (!activeJobId) return;
+    const currentId = activeJobId;
+    stopPolling();
+    setIsDownloading(false);
+    setActiveJobId(null);
+    setDownloadProgress(0);
+    setDownloadProgressText('');
+    try {
+      await fetch(`/api/vod/job/${currentId}/cancel`, { method: 'POST' });
+      onShowToast('İndirme işlemi iptal edildi.', 'info');
+    } catch (e) {
+      // ignore
+    }
+  };
 
   // Active background download tracking notice (prevents user from thinking download was cancelled)
   const [activeDownloadNotice, setActiveDownloadNotice] = useState<{
@@ -345,21 +377,23 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
     }
   };
 
-  // Download Handler (Direct chunked stream download with preflight verification)
+  // Download Handler (Job-based async download with live progress and complete MOOV duration)
   const handleDownloadVod = async () => {
     if (!selectedVod) return;
+    stopPolling();
 
     setIsDownloading(true);
     setDownloadError(null);
-    setDownloadProgress(0);
-    setDownloadProgressText('1/3: Yayın bağlantısı ve akış doğrulanıyor...');
+    setDownloadProgress(2);
+    setDownloadProgressText('1/3: Yayın bağlantısı ve Kick CDN akışı doğrulanıyor...');
+    setJobSpeed('1x');
 
     try {
       const startSec = activeMode === 'segment' ? parseTimeToSeconds(segmentStart) : 0;
       const endSec = activeMode === 'segment' ? parseTimeToSeconds(segmentEnd) : 0;
       const durationSec = activeMode === 'segment' && endSec > startSec ? endSec - startSec : 0;
 
-      // 1. Fast preflight verification to guarantee stream is accessible and prevent HTML error file downloads
+      // 1. Fast preflight verification to guarantee stream is accessible
       const verifyParams = new URLSearchParams({
         url: selectedVod.source,
         uuid: selectedVod.uuid,
@@ -373,40 +407,34 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
         throw new Error(verifyJson?.error || 'Yayın akışına ulaşılamadı. Kick sunucularında süresi dolmuş veya kaldırılmış olabilir.');
       }
 
-      setDownloadProgress(35);
-      setDownloadProgressText('2/3: Akış başlatılıyor ve tarayıcıya aktarılıyor...');
+      setDownloadProgress(5);
+      setDownloadProgressText('2/3: YouTube & Montaj uyumlu video hazırlama motoru başlatılıyor...');
 
-      const params = new URLSearchParams({
-        url: selectedVod.source,
-        uuid: selectedVod.uuid,
-        title: selectedVod.title || 'kick_yayin',
-        format: selectedFormat,
-        quality: selectedQuality,
+      // 2. Start VOD Job on the server
+      const jobRes = await fetch('/api/vod/job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: selectedVod.source,
+          uuid: selectedVod.uuid,
+          title: selectedVod.title || 'kick_yayin',
+          format: selectedFormat,
+          quality: selectedQuality,
+          start: startSec,
+          duration: durationSec,
+          end: endSec,
+          edit: isEditOptimized,
+        }),
       });
 
-      if (isEditOptimized) params.set('edit', 'true');
-      if (startSec > 0) params.set('start', startSec.toString());
-      if (durationSec > 0) params.set('duration', durationSec.toString());
+      const jobData = await jobRes.json().catch(() => null);
+      if (!jobRes.ok || !jobData || !jobData.ok) {
+        throw new Error(jobData?.error || 'İndirme görevi sunucuda başlatılamadı.');
+      }
 
-      const downloadEndpoint = `/api/vod/download?${params.toString()}`;
-
-      // Construct clean, explicit file name so browser never defaults to .html
-      const safeTitle = (selectedVod.title || 'Kick_Yayin').replace(/[^\w\s\u00C0-\u017F\u0400-\u04FF-]/gi, '').trim().replace(/\s+/g, '_') || 'Kick_Yayin';
-      const rangeSuffix = activeMode === 'segment' ? '_Bolum' : '_Tam';
-      const ext = selectedFormat || 'mp4';
-      const targetFilename = `${safeTitle}${rangeSuffix}_${selectedQuality}.${ext}`;
-
-      // Trigger native browser download directly with explicit filename!
-      // This streams directly to disk without loading into browser JS RAM or server disk
-      const anchor = document.createElement('a');
-      anchor.href = downloadEndpoint;
-      anchor.download = targetFilename;
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-
-      setDownloadProgress(100);
-      setDownloadProgressText('3/3: İndirme tarayıcınıza aktarıldı! Arka planda güvenle diske kaydediliyor...');
+      const jobId = jobData.jobId;
+      setActiveJobId(jobId);
+      const totalDuration = jobData.targetDurationStr || jobData.targetDurationSec || (selectedVod.duration || 0);
 
       const nowTime = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setActiveDownloadNotice({
@@ -414,32 +442,90 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
         quality: selectedQuality.toUpperCase(),
         format: selectedFormat.toUpperCase(),
         startedAt: nowTime,
-        directUrl: downloadEndpoint,
+        directUrl: `/api/vod/file/${jobId}`,
         mode: activeMode === 'segment' ? 'segment' : 'full',
         rangeText: activeMode === 'segment' ? `${segmentStart} - ${segmentEnd}` : undefined,
       });
 
-      onShowToast('İndirme tarayıcınızda arka planda devam ediyor! (İptal olmadı)', 'success');
+      // 3. Poll progress every 1000ms
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/vod/job/${jobId}`);
+          if (!statusRes.ok) return;
+          const statusData = await statusRes.json();
 
-      confetti({
-        particleCount: 90,
-        spread: 75,
-        origin: { y: 0.6 },
-        colors: ['#53fc18', '#00ff88', '#ffffff', '#22c55e'],
-      });
+          if (!statusData.ok) return;
 
-      setTimeout(() => {
-        if (anchor.parentNode) {
-          anchor.parentNode.removeChild(anchor);
+          if (statusData.speed) {
+            setJobSpeed(statusData.speed);
+          }
+
+          if (statusData.status === 'processing') {
+            const p = Math.max(5, statusData.progressPercent || 5);
+            setDownloadProgress(p);
+            const curText = statusData.currentTimeSec ? formatSecondsToTime(statusData.currentTimeSec) : '00:00:00';
+            const totText = totalDuration > 0 ? ` / ${formatSecondsToTime(totalDuration)}` : '';
+            setDownloadProgressText(
+              `İşleniyor: %${p} (${curText}${totText} • Hız: ${statusData.speed || '1x'})`
+            );
+          } else if (statusData.status === 'completed') {
+            stopPolling();
+            setDownloadProgress(100);
+            setDownloadProgressText('3/3: Tamamlandı! Video tarayıcınıza indiriliyor...');
+
+            // Trigger instant browser download from ready file
+            const downloadUrl = statusData.downloadUrl || `/api/vod/file/${jobId}`;
+            const anchor = document.createElement('a');
+            anchor.href = downloadUrl;
+            anchor.download = statusData.filename || `${selectedVod.title || 'Kick_Yayin'}.${selectedFormat}`;
+            anchor.style.display = 'none';
+            document.body.appendChild(anchor);
+            anchor.click();
+
+            setActiveDownloadNotice({
+              title: selectedVod.title || 'Kick Yayını',
+              quality: selectedQuality.toUpperCase(),
+              format: selectedFormat.toUpperCase(),
+              startedAt: nowTime,
+              directUrl: downloadUrl,
+              mode: activeMode === 'segment' ? 'segment' : 'full',
+              rangeText: activeMode === 'segment' ? `${segmentStart} - ${segmentEnd}` : undefined,
+            });
+
+            onShowToast('Video başarıyla hazırlandı ve indirme başladı! (Kurgu ve YouTube ile %100 uyumludur)', 'success');
+
+            confetti({
+              particleCount: 100,
+              spread: 80,
+              origin: { y: 0.6 },
+              colors: ['#53fc18', '#00ff88', '#ffffff', '#22c55e'],
+            });
+
+            setTimeout(() => {
+              if (anchor.parentNode) {
+                anchor.parentNode.removeChild(anchor);
+              }
+              setIsDownloading(false);
+              setActiveJobId(null);
+              setDownloadProgressText('');
+              setDownloadProgress(0);
+            }, 3000);
+          } else if (statusData.status === 'error') {
+            stopPolling();
+            setIsDownloading(false);
+            setActiveJobId(null);
+            setDownloadError(statusData.error || 'Video işlenirken beklenmeyen bir hata oluştu.');
+          }
+        } catch (pollErr: any) {
+          console.warn('Poll error:', pollErr);
         }
-        setIsDownloading(false);
-        setDownloadProgressText('');
-        setDownloadProgress(0);
-      }, 3000);
+      }, 1000);
     } catch (err: any) {
+      stopPolling();
       console.error('VOD Download error:', err);
       setDownloadError(err.message || 'Yayın indirme işlemi başlatılamadı.');
       setIsDownloading(false);
+      setActiveJobId(null);
       setDownloadProgressText('');
       setDownloadProgress(0);
     }
@@ -1201,21 +1287,45 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
               <div className="space-y-4 pt-4 border-t border-white/10">
                 {/* Progress bar */}
                 {isDownloading && (
-                  <div className="space-y-2 p-4 rounded-2xl bg-black/50 border border-[#53fc18]/30">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="flex items-center gap-2 text-[#53fc18]">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        {downloadProgressText || 'Yayın hazırlanıyor...'}
+                  <div className="space-y-3 p-4 sm:p-5 rounded-2xl bg-black/60 border border-[#53fc18]/40 shadow-xl shadow-[#53fc18]/10 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-xs font-semibold gap-3 flex-wrap">
+                      <span className="flex items-center gap-2 text-[#53fc18] font-bold">
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        <span>{downloadProgressText || 'Yayın hazırlanıyor...'}</span>
                       </span>
-                      <span className="font-mono text-white font-bold">
-                        {downloadProgress > 0 ? `%${downloadProgress}` : 'İşleniyor'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-white font-extrabold text-xs px-2.5 py-1 rounded-lg bg-white/10 border border-white/10">
+                          {downloadProgress > 0 ? `%${downloadProgress}` : 'İşleniyor'}
+                        </span>
+                        {activeJobId && (
+                          <button
+                            type="button"
+                            onClick={handleCancelJob}
+                            className="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-white text-xs font-bold transition-colors cursor-pointer border border-red-500/30"
+                          >
+                            İptal Et
+                          </button>
+                        )}
+                      </div>
                     </div>
+
                     <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5 border border-white/5">
                       <div
                         className="bg-gradient-to-r from-[#53fc18] to-emerald-400 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${downloadProgress > 0 ? downloadProgress : 15}%` }}
+                        style={{ width: `${downloadProgress > 0 ? downloadProgress : 10}%` }}
                       />
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-[11px]">
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#53fc18] shrink-0" />
+                        <span>Kurgu & YouTube Uyumlu (MOOV FastStart: 3 Saniye Kesilme Koruması)</span>
+                      </div>
+                      {jobSpeed && jobSpeed !== '1x' && (
+                        <span className="font-mono text-slate-300 bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                          Hız: <strong className="text-white">{jobSpeed}</strong>
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
