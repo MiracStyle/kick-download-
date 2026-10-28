@@ -63,6 +63,10 @@ export const DownloadOptions: React.FC<DownloadOptionsProps> = ({
   const [downloadProgressText, setDownloadProgressText] = useState<string>('');
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [recentDownloadNotice, setRecentDownloadNotice] = useState<{
+    filename: string;
+    time: string;
+  } | null>(null);
 
   const handleToggleEditOptimized = () => {
     if (isEditOptimized) {
@@ -358,6 +362,12 @@ export const DownloadOptions: React.FC<DownloadOptionsProps> = ({
       anchor.download = filename;
       document.body.appendChild(anchor);
       anchor.click();
+
+      const nowTime = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      setRecentDownloadNotice({
+        filename,
+        time: nowTime,
+      });
 
       confetti({
         particleCount: 85,
@@ -809,6 +819,35 @@ export const DownloadOptions: React.FC<DownloadOptionsProps> = ({
                 <ExternalLink className="w-3.5 h-3.5 text-[#53fc18]" />
                 Yeni Sekmede Doğrudan Aç
               </a>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Download Confirmation Banner */}
+        {recentDownloadNotice && (
+          <div className="p-3.5 rounded-xl bg-gradient-to-r from-black/90 via-emerald-950/30 to-black/90 border border-[#53fc18]/50 text-xs space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-[#53fc18]/20 border border-[#53fc18]/60 flex items-center justify-center text-[#53fc18] shrink-0 mt-0.5">
+                  <Check className="w-4 h-4 stroke-[3]" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-white text-xs flex items-center gap-1.5">
+                    Klip İndirildi / Tarayıcınıza Aktarıldı!
+                    <span className="text-[10px] text-slate-400 font-mono">({recentDownloadNotice.time})</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                    Dosya tarayıcınızın <strong>İndirilenler</strong> klasörüne kaydedilmiştir (<kbd className="px-1 py-0.2 bg-black/60 rounded border border-white/20 font-mono text-white text-[10px]">Ctrl + J</kbd> ile açabilirsiniz).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecentDownloadNotice(null)}
+                className="text-slate-400 hover:text-white px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[11px] transition-colors shrink-0 cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
           </div>
         )}

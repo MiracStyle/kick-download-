@@ -61,6 +61,17 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
+  // Active background download tracking notice (prevents user from thinking download was cancelled)
+  const [activeDownloadNotice, setActiveDownloadNotice] = useState<{
+    title: string;
+    quality: string;
+    format: string;
+    startedAt: string;
+    directUrl: string;
+    mode: 'full' | 'segment';
+    rangeText?: string;
+  } | null>(null);
+
   const handleToggleEditOptimized = () => {
     if (isEditOptimized) {
       setShowEditWarningModal(true);
@@ -361,102 +372,49 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
       if (durationSec > 0) params.set('duration', durationSec.toString());
 
       const downloadEndpoint = `/api/vod/download?${params.toString()}`;
-      const response = await fetch(downloadEndpoint);
 
-      if (!response.ok) {
-        let errMessage = 'Yayın indirilemedi.';
-        try {
-          const errData = await response.json();
-          if (errData && errData.error) errMessage = errData.error;
-        } catch {
-          // ignore
-        }
-        throw new Error(errMessage);
-      }
-
-      setDownloadProgressText('2/3: Tarayıcınıza aktarılıyor...');
-
-      const contentLengthHeader = response.headers.get('Content-Length');
-      const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
-
-      let filename = `${(selectedVod.title || 'Kick_Yayin').replace(/[\\/:*?"<>|]/g, '_')}_${selectedFormat === 'mp3' ? 'Audio.mp3' : `${selectedQuality}.mp4`}`;
-      const disp = response.headers.get('Content-Disposition');
-      if (disp) {
-        const utfMatch = disp.match(/filename\*=UTF-8''([^;]+)/i);
-        if (utfMatch && utfMatch[1]) {
-          filename = decodeURIComponent(utfMatch[1]);
-        } else {
-          const stdMatch = disp.match(/filename="?([^";]+)"?/i);
-          if (stdMatch && stdMatch[1]) {
-            filename = stdMatch[1];
-          }
-        }
-      }
-
-      let blob: Blob;
-
-      if (response.body && totalBytes > 0) {
-        const reader = response.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let receivedBytes = 0;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          receivedBytes += value.length;
-          const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-          const mbReceived = (receivedBytes / (1024 * 1024)).toFixed(1);
-          const mbTotal = (totalBytes / (1024 * 1024)).toFixed(1);
-          setDownloadProgress(percent);
-          setDownloadProgressText(`2/3: Cihaza aktarılıyor: %${percent} (${mbReceived} MB / ${mbTotal} MB)`);
-        }
-
-        const mimeTypes: Record<string, string> = {
-          mp4: 'video/mp4',
-          webm: 'video/webm',
-          avi: 'video/x-msvideo',
-          mkv: 'video/x-matroska',
-          mp3: 'audio/mpeg',
-          m4a: 'audio/mp4',
-        };
-        const mime = mimeTypes[selectedFormat] || 'video/mp4';
-        blob = new Blob(chunks as unknown as BlobPart[], { type: mime });
-      } else {
-        blob = await response.blob();
-      }
-
-      if (blob.size < 50000) {
-        throw new Error('İndirilen yayın dosyası eksik veya bağlantı kesildi. Lütfen tekrar deneyin.');
-      }
-
-      setDownloadProgress(100);
-      setDownloadProgressText('3/3: Tamamlandı! Yayın cihazınıza kaydedildi.');
-
-      const objectUrl = window.URL.createObjectURL(blob);
+      // Trigger native browser download directly!
+      // This allows multi-gigabyte 1080p videos to stream directly to hard drive
+      // without exhausting browser JavaScript heap RAM or crashing the tab.
       const anchor = document.createElement('a');
-      anchor.href = objectUrl;
-      anchor.download = filename;
+      anchor.href = downloadEndpoint;
+      anchor.download = '';
+      anchor.style.display = 'none';
       document.body.appendChild(anchor);
       anchor.click();
 
+      setDownloadProgress(100);
+      setDownloadProgressText('İndirme tarayıcınıza aktarıldı! Arka planda güvenle diske kaydediliyor...');
+
+      const nowTime = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setActiveDownloadNotice({
+        title: selectedVod.title || 'Kick Yayını',
+        quality: selectedQuality.toUpperCase(),
+        format: selectedFormat.toUpperCase(),
+        startedAt: nowTime,
+        directUrl: downloadEndpoint,
+        mode: activeMode === 'segment' ? 'segment' : 'full',
+        rangeText: activeMode === 'segment' ? `${segmentStart} - ${segmentEnd}` : undefined,
+      });
+
+      onShowToast('İndirme tarayıcınızda arka planda devam ediyor! (İptal olmadı)', 'success');
+
       confetti({
-        particleCount: 100,
-        spread: 80,
+        particleCount: 90,
+        spread: 75,
         origin: { y: 0.6 },
         colors: ['#53fc18', '#00ff88', '#ffffff', '#22c55e'],
       });
 
       setTimeout(() => {
         document.body.removeChild(anchor);
-        window.URL.revokeObjectURL(objectUrl);
         setIsDownloading(false);
         setDownloadProgressText('');
         setDownloadProgress(0);
       }, 3000);
     } catch (err: any) {
       console.error('VOD Download error:', err);
-      setDownloadError(err.message || 'Yayın indirme işlemi başarısız oldu.');
+      setDownloadError(err.message || 'Yayın indirme işlemi başlatılamadı.');
       setIsDownloading(false);
       setDownloadProgressText('');
     }
@@ -1218,6 +1176,82 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
                         <ExternalLink className="w-3.5 h-3.5 text-[#53fc18]" />
                         Yeni Sekmede Aç
                       </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Download Confirmation Banner (Assures user the download is running in the background and is NOT cancelled) */}
+                {activeDownloadNotice && (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-black/95 via-emerald-950/40 to-black/95 border-2 border-[#53fc18] shadow-2xl shadow-[#53fc18]/20 space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="relative mt-0.5 shrink-0">
+                          <div className="w-10 h-10 rounded-xl bg-[#53fc18]/20 border border-[#53fc18] flex items-center justify-center text-[#53fc18]">
+                            <Download className="w-5 h-5 animate-bounce" />
+                          </div>
+                          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#53fc18] animate-ping" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded bg-[#53fc18] text-black text-[10px] font-black tracking-wider uppercase">
+                              İNDİRME ARKA PLANDA SÜRÜYOR
+                            </span>
+                            <span className="text-xs text-slate-400 font-mono">
+                              Başlatıldı: {activeDownloadNotice.startedAt}
+                            </span>
+                          </div>
+                          <h4 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+                            Video Tarayıcınız Tarafından Diske İndiriliyor!
+                          </h4>
+                          <p className="text-xs text-slate-200 leading-relaxed">
+                            <strong className="text-[#53fc18]">İşlem kesinlikle iptal olmadı.</strong> Ekrandaki hazırlık bildirimi kapansa bile, tarayıcınız büyük boyutlu yayın dosyasını arka planda kesintisiz olarak doğrudan bilgisayarınıza/telefonunuza kaydetmeye devam etmektedir.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveDownloadNotice(null)}
+                        className="text-slate-400 hover:text-white px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold transition-colors shrink-0 cursor-pointer"
+                        title="Bildirimi kapat"
+                      >
+                        ✕ Kapat
+                      </button>
+                    </div>
+
+                    {/* File & Details row */}
+                    <div className="p-3 bg-black/70 rounded-xl border border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 text-slate-300 min-w-0">
+                        <Film className="w-4 h-4 text-[#53fc18] shrink-0" />
+                        <span className="font-semibold text-white truncate max-w-[200px] sm:max-w-xs md:max-w-md">
+                          {activeDownloadNotice.title}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-[#53fc18]/20 border border-[#53fc18]/40 text-[#53fc18] font-mono font-bold text-[11px] shrink-0">
+                          {activeDownloadNotice.quality} • {activeDownloadNotice.format}
+                        </span>
+                        {activeDownloadNotice.rangeText && (
+                          <span className="px-2 py-0.5 rounded bg-white/10 text-slate-300 text-[11px] shrink-0">
+                            Aralık: {activeDownloadNotice.rangeText}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={activeDownloadNotice.directUrl}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#53fc18]/20 hover:bg-[#53fc18]/30 border border-[#53fc18]/40 text-[#53fc18] text-xs font-bold transition-all"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>İndirmeyi Tekrar Başlat</span>
+                        </a>
+                      </div>
+                    </div>
+
+                    {/* How to track in browser */}
+                    <div className="flex items-start gap-2.5 text-[11px] text-slate-300 bg-white/5 p-3 rounded-xl border border-white/5">
+                      <Check className="w-4 h-4 text-[#53fc18] shrink-0 mt-0.5" />
+                      <span>
+                        <strong>İndirme ilerlemesini nasıl görebilirsiniz?</strong> Tarayıcınızın sağ üst köşesindeki <strong>"İndirilenler"</strong> simgesine tıklayabilir ya da klavyenizden <kbd className="px-1.5 py-0.5 bg-black/60 rounded border border-white/20 font-mono text-white text-[10px]">Ctrl + J</kbd> (Mac'te <kbd className="px-1.5 py-0.5 bg-black/60 rounded border border-white/20 font-mono text-white text-[10px]">Cmd + Shift + J</kbd>) tuşlarına basarak indirilen megabaytları ve kalan süreyi canlı izleyebilirsiniz.
+                      </span>
                     </div>
                   </div>
                 )}
