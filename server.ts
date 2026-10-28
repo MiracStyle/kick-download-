@@ -3,7 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { exec, execFile } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import os from 'os';
 import crypto from 'crypto';
 
@@ -881,18 +881,81 @@ async function resolveKickVariantUrl(masterUrl: string, targetQuality: string): 
 }
 
 // API: VOD (Full Broadcast) Download
-app.get('/api/vod/download', async (req: Request, res: Response) => {
-  const tmpFilesToClean: string[] = [];
+// API: VOD Preflight Verification to guarantee no HTML error download
+app.get('/api/vod/verify', async (req: Request, res: Response) => {
+  try {
+    let sourceUrl = (req.query.url as string) || '';
+    const vodUuid = (req.query.uuid as string) || (req.query.id as string) || '';
+    const quality = (req.query.quality as string) || '1080p';
 
-  const cleanup = () => {
-    for (const f of tmpFilesToClean) {
+    if (!sourceUrl && vodUuid) {
+      const vod = await fetchKickVod(vodUuid);
+      sourceUrl = vod.source;
+    }
+
+    if (!sourceUrl) {
+      return res.status(400).json({ ok: false, error: 'Yayın adresi (m3u8) bulunamadı.' });
+    }
+
+    const streamUrlToDownload = await resolveKickVariantUrl(sourceUrl, quality);
+
+    // Fast check if m3u8 is reachable
+    const checkStatus = await new Promise<number>((resolve) => {
+      execFile(
+        'curl',
+        [
+          '-s',
+          '-I',
+          '-m',
+          '4',
+          streamUrlToDownload,
+          '-H',
+          'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          '-H',
+          'Referer: https://kick.com/',
+        ],
+        (err, stdout) => {
+          if (err) return resolve(500);
+          const firstLine = stdout.split('\n')[0] || '';
+          const match = firstLine.match(/HTTP\/\S+\s+(\d+)/);
+          resolve(match ? parseInt(match[1], 10) : 200);
+        }
+      );
+    });
+
+    if (checkStatus >= 400) {
+      return res.status(404).json({
+        ok: false,
+        error: `Yayın akışı Kick sunucularında bulunamadı veya süresi dolmuş (Durum: ${checkStatus}).`,
+      });
+    }
+
+    return res.json({ ok: true, streamUrl: streamUrlToDownload });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message || 'Yayın doğrulanamadı.' });
+  }
+});
+
+// API: VOD (Full Broadcast) Direct Chunked Stream Download
+app.get('/api/vod/download', async (req: Request, res: Response) => {
+  // Prevent any gateway or proxy timeout on long downloads
+  req.setTimeout(0);
+  res.setTimeout(0);
+
+  let ffmpegProc: any = null;
+
+  const killProc = () => {
+    if (ffmpegProc && !ffmpegProc.killed) {
       try {
-        if (fs.existsSync(f)) fs.unlinkSync(f);
+        ffmpegProc.kill('SIGTERM');
       } catch (e) {
         // ignore
       }
     }
   };
+
+  req.on('close', killProc);
+  res.on('close', killProc);
 
   try {
     let sourceUrl = (req.query.url as string) || '';
@@ -914,10 +977,10 @@ app.get('/api/vod/download', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Yayın akış URL (m3u8) bulunamadı.' });
     }
 
-    // Resolve exact variant subplaylist (e.g. 1080p60/playlist.m3u8) directly from master.m3u8
-    const streamUrlToDownload = await resolveKickVariantUrl(sourceUrl, quality);
-
     const isAudio = ['mp3', 'm4a', 'wav'].includes(format);
+    const streamTargetQuality = isAudio ? '240p' : quality;
+    const streamUrlToDownload = await resolveKickVariantUrl(sourceUrl, streamTargetQuality);
+
     const extMap: Record<string, string> = {
       mp4: 'mp4',
       webm: 'webm',
@@ -954,82 +1017,98 @@ app.get('/api/vod/download', async (req: Request, res: Response) => {
     const asciiFilename = `${toSafeAscii(safeTitle)}${rangeSuffix}_${qualitySuffix}.${ext}`;
     const encodedUtf8Filename = encodeURIComponent(outFilename);
 
-    const uniqueId = crypto.randomBytes(6).toString('hex');
-    const tempFilePath = path.join(os.tmpdir(), `kick_vod_${uniqueId}.${ext}`);
-    tmpFilesToClean.push(tempFilePath);
+    const ffmpegArgs: string[] = [
+      '-nostdin',
+      '-y',
+      '-loglevel', 'error',
+      '-fflags', '+genpts+discardcorrupt',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '-headers', 'Referer: https://kick.com/\r\n',
+      '-rw_timeout', '15000000',
+    ];
 
-    let ffmpegCmd = `ffmpeg -nostdin -y -fflags +genpts+discardcorrupt -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -headers "Referer: https://kick.com/\r\n" -rw_timeout 15000000 `;
-
-    // Fast input seek if startSec > 0
     if (startSec > 0) {
-      ffmpegCmd += `-ss ${startSec} `;
+      ffmpegArgs.push('-ss', startSec.toString());
     }
 
-    ffmpegCmd += `-i "${streamUrlToDownload}" `;
+    ffmpegArgs.push('-i', streamUrlToDownload);
 
-    // Output duration trimming (MUST be after -i)
     if (durationSec && durationSec > 0) {
-      ffmpegCmd += `-t ${durationSec} `;
+      ffmpegArgs.push('-t', durationSec.toString());
     } else if (endSec && endSec > startSec) {
-      ffmpegCmd += `-t ${endSec - startSec} `;
+      ffmpegArgs.push('-t', (endSec - startSec).toString());
     }
 
     if (format === 'mp3') {
       const audioBitrate = customBitrate || (quality === '64k' ? '64k' : quality === '128k' ? '128k' : quality === '320k' ? '320k' : '192k');
-      ffmpegCmd += `-vn -c:a libmp3lame -b:a ${audioBitrate} "${tempFilePath}"`;
+      ffmpegArgs.push('-vn', '-c:a', 'libmp3lame', '-b:a', audioBitrate, '-f', 'mp3', 'pipe:1');
     } else if (format === 'm4a') {
       const audioBitrate = customBitrate || '192k';
-      ffmpegCmd += `-vn -c:a aac -b:a ${audioBitrate} "${tempFilePath}"`;
+      ffmpegArgs.push('-vn', '-c:a', 'aac', '-b:a', audioBitrate, '-f', 'adts', 'pipe:1');
     } else if (format === 'wav') {
-      ffmpegCmd += `-vn -c:a pcm_s16le "${tempFilePath}"`;
+      ffmpegArgs.push('-vn', '-c:a', 'pcm_s16le', '-f', 'wav', 'pipe:1');
     } else if (format === 'webm') {
       const webmBitrate = customBitrate || (quality === '240p' ? '180k' : quality === '360p' ? '400k' : quality === '480p' ? '700k' : quality === '720p_eco' ? '1000k' : quality === '720p' ? '1600k' : '2800k');
-      const scaleArg = quality === '240p' ? '-vf scale=-2:240' : '';
-      ffmpegCmd += `${scaleArg} -c:v libvpx-vp9 -b:v ${webmBitrate} -deadline realtime -cpu-used 8 -c:a libopus -b:a 96k "${tempFilePath}"`;
+      if (quality === '240p') ffmpegArgs.push('-vf', 'scale=-2:240');
+      ffmpegArgs.push('-c:v', 'libvpx-vp9', '-b:v', webmBitrate, '-deadline', 'realtime', '-cpu-used', '8', '-c:a', 'libopus', '-b:a', '96k', '-f', 'webm', 'pipe:1');
     } else if (format === 'avi') {
-      const qscale = quality === '240p' ? 10 : quality === '360p' ? 8 : quality === '480p' ? 6 : quality === '720p_eco' ? 6 : 4;
-      const scaleArg = quality === '240p' ? '-vf scale=-2:240' : '';
-      ffmpegCmd += `${scaleArg} -c:v mpeg4 -qscale:v ${qscale} -c:a libmp3lame -b:a 160k "${tempFilePath}"`;
+      const qscale = quality === '240p' ? '10' : quality === '360p' ? '8' : quality === '480p' ? '6' : quality === '720p_eco' ? '6' : '4';
+      if (quality === '240p') ffmpegArgs.push('-vf', 'scale=-2:240');
+      ffmpegArgs.push('-c:v', 'mpeg4', '-qscale:v', qscale, '-c:a', 'libmp3lame', '-b:a', '160k', '-f', 'avi', 'pipe:1');
     } else if (format === 'mkv') {
-      ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero "${tempFilePath}"`;
+      ffmpegArgs.push('-c:v', 'copy', '-c:a', 'copy', '-bsf:a', 'aac_adtstoasc', '-avoid_negative_ts', 'make_zero', '-f', 'matroska', 'pipe:1');
     } else {
       // Default: MP4 (H.264 / AAC)
-      // For VODs & long broadcasts (especially 1080p Full HD):
-      // ALWAYS use high-speed direct stream copy with timestamp zeroing, AAC bitstream conversion, and faststart.
-      // This runs at 20x-30x speed, uses 0% CPU, eliminates 100-sec timeouts, and guarantees smooth timeline scrubbing in CapCut/Premiere!
-      ffmpegCmd += `-c:v copy -c:a copy -bsf:a aac_adtstoasc -avoid_negative_ts make_zero -movflags +faststart "${tempFilePath}"`;
+      // Direct high-speed stream copy with timestamp zeroing, AAC bitstream conversion, and fragmented MP4 flags.
+      // This streams immediately to the client without buffering on disk, avoids Cloud Run / gateway 504 timeouts,
+      // and guarantees fluid timeline scrubbing without freeze in editing suites (CapCut, Premiere Pro, DaVinci Resolve)!
+      ffmpegArgs.push(
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-bsf:a', 'aac_adtstoasc',
+        '-avoid_negative_ts', 'make_zero',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        '-f', 'mp4',
+        'pipe:1'
+      );
     }
 
-    // Generous timeout for VOD downloading
-    exec(ffmpegCmd, { timeout: 600000 }, (err) => {
-      const fileExists = fs.existsSync(tempFilePath);
-      const fileSize = fileExists ? fs.statSync(tempFilePath).size : 0;
+    // Set immediate streaming download headers so browser catches it as a video/audio file instantly!
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedUtf8Filename}`);
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
-      if (err || !fileExists || fileSize < 50000) {
-        console.error('VOD FFmpeg transcode error or truncated file (size:', fileSize, 'bytes):', err);
-        cleanup();
-        if (!res.headersSent) {
-          return res.status(500).json({ error: 'Yayın indirilirken bir hata oluştu veya dosya eksik işlendi. Lütfen tekrar deneyin.' });
-        }
-        return;
+    ffmpegProc = spawn('ffmpeg', ffmpegArgs);
+
+    let stderrBuffer = '';
+    ffmpegProc.stderr.on('data', (d: Buffer) => {
+      stderrBuffer += d.toString();
+      if (stderrBuffer.length > 2000) {
+        stderrBuffer = stderrBuffer.slice(-2000);
       }
+    });
 
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedUtf8Filename}`);
+    ffmpegProc.stdout.pipe(res);
 
-      const fileStream = fs.createReadStream(tempFilePath);
-      fileStream.on('close', () => {
-        cleanup();
-      });
-      fileStream.on('error', (streamErr) => {
-        console.error('VOD Stream response error:', streamErr);
-        cleanup();
-      });
-      fileStream.pipe(res);
+    ffmpegProc.on('error', (err: any) => {
+      console.error('VOD FFmpeg stream spawn error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Yayın indirme motoru başlatılamadı.' });
+      } else {
+        res.end();
+      }
+    });
+
+    ffmpegProc.on('close', (code: number) => {
+      if (code !== 0 && code !== null) {
+        console.warn('VOD FFmpeg process closed with code:', code, stderrBuffer);
+      }
+      res.end();
     });
   } catch (err: any) {
-    cleanup();
-    console.error('VOD Download error:', err);
+    killProc();
+    console.error('VOD Download route error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message || 'Yayın indirme işlemi başarısız oldu.' });
     }

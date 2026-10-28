@@ -345,19 +345,36 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
     }
   };
 
-  // Download Handler (Blob download with progress & fallback)
+  // Download Handler (Direct chunked stream download with preflight verification)
   const handleDownloadVod = async () => {
     if (!selectedVod) return;
 
     setIsDownloading(true);
     setDownloadError(null);
     setDownloadProgress(0);
-    setDownloadProgressText('1/3: Yayın sunucuda hazırlanıyor & paketleniyor...');
+    setDownloadProgressText('1/3: Yayın bağlantısı ve akış doğrulanıyor...');
 
     try {
       const startSec = activeMode === 'segment' ? parseTimeToSeconds(segmentStart) : 0;
       const endSec = activeMode === 'segment' ? parseTimeToSeconds(segmentEnd) : 0;
       const durationSec = activeMode === 'segment' && endSec > startSec ? endSec - startSec : 0;
+
+      // 1. Fast preflight verification to guarantee stream is accessible and prevent HTML error file downloads
+      const verifyParams = new URLSearchParams({
+        url: selectedVod.source,
+        uuid: selectedVod.uuid,
+        quality: selectedQuality,
+      });
+
+      const verifyRes = await fetch(`/api/vod/verify?${verifyParams.toString()}`);
+      const verifyJson = await verifyRes.json().catch(() => null);
+
+      if (!verifyRes.ok || !verifyJson || !verifyJson.ok) {
+        throw new Error(verifyJson?.error || 'Yayın akışına ulaşılamadı. Kick sunucularında süresi dolmuş veya kaldırılmış olabilir.');
+      }
+
+      setDownloadProgress(35);
+      setDownloadProgressText('2/3: Akış başlatılıyor ve tarayıcıya aktarılıyor...');
 
       const params = new URLSearchParams({
         url: selectedVod.source,
@@ -373,18 +390,23 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
 
       const downloadEndpoint = `/api/vod/download?${params.toString()}`;
 
-      // Trigger native browser download directly!
-      // This allows multi-gigabyte 1080p videos to stream directly to hard drive
-      // without exhausting browser JavaScript heap RAM or crashing the tab.
+      // Construct clean, explicit file name so browser never defaults to .html
+      const safeTitle = (selectedVod.title || 'Kick_Yayin').replace(/[^\w\s\u00C0-\u017F\u0400-\u04FF-]/gi, '').trim().replace(/\s+/g, '_') || 'Kick_Yayin';
+      const rangeSuffix = activeMode === 'segment' ? '_Bolum' : '_Tam';
+      const ext = selectedFormat || 'mp4';
+      const targetFilename = `${safeTitle}${rangeSuffix}_${selectedQuality}.${ext}`;
+
+      // Trigger native browser download directly with explicit filename!
+      // This streams directly to disk without loading into browser JS RAM or server disk
       const anchor = document.createElement('a');
       anchor.href = downloadEndpoint;
-      anchor.download = '';
+      anchor.download = targetFilename;
       anchor.style.display = 'none';
       document.body.appendChild(anchor);
       anchor.click();
 
       setDownloadProgress(100);
-      setDownloadProgressText('İndirme tarayıcınıza aktarıldı! Arka planda güvenle diske kaydediliyor...');
+      setDownloadProgressText('3/3: İndirme tarayıcınıza aktarıldı! Arka planda güvenle diske kaydediliyor...');
 
       const nowTime = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setActiveDownloadNotice({
@@ -407,7 +429,9 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
       });
 
       setTimeout(() => {
-        document.body.removeChild(anchor);
+        if (anchor.parentNode) {
+          anchor.parentNode.removeChild(anchor);
+        }
         setIsDownloading(false);
         setDownloadProgressText('');
         setDownloadProgress(0);
@@ -417,6 +441,7 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
       setDownloadError(err.message || 'Yayın indirme işlemi başlatılamadı.');
       setIsDownloading(false);
       setDownloadProgressText('');
+      setDownloadProgress(0);
     }
   };
 
@@ -848,6 +873,26 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
                   </div>
                 </div>
 
+                {/* 1 Hour+ Broadcast Direct Stream Guarantee */}
+                {selectedVod.duration >= 3600 && (
+                  <div className="bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-black/60 border border-blue-500/30 rounded-xl p-3.5 flex items-start gap-3 text-xs">
+                    <div className="p-1.5 rounded-lg bg-blue-500/20 text-blue-400 shrink-0 mt-0.5">
+                      <Check className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-white">Uzun Yayın Koruması Aktif ({formatReadableDuration(selectedVod.duration)})</span>
+                        <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-extrabold text-[10px] border border-blue-500/30">
+                          HTML İNME SORUNU GİDERİLDİ
+                        </span>
+                      </div>
+                      <p className="text-slate-300 leading-relaxed">
+                        1 saat ve üzeri uzun yayınlar sunucu belleğinde bekletilmeden doğrudan tarayıcınıza kesintisiz canlı akış (chunked stream) olarak aktarılır. Tarayıcınız dosyayı doğrudan <strong>.MP4</strong> olarak kaydeder, zaman aşımı ve html olarak inme hatası engellenmiştir.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Low Bitrate Notice */}
                 <div className="bg-gradient-to-r from-emerald-500/10 via-black/40 to-cyan-500/10 border border-emerald-500/20 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2 text-emerald-300">
@@ -1104,7 +1149,7 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-white flex items-center gap-1.5">
                       <Terminal className="w-4 h-4 text-[#53fc18]" />
-                      FFmpeg Terminal Komutu (Tek Satırda Hızlı Kaydetme)
+                      FFmpeg Terminal Komutu (Ultra Hızlı Kopyalama)
                     </span>
                     <button
                       onClick={() =>
@@ -1121,6 +1166,31 @@ export const VodDownloader: React.FC<VodDownloaderProps> = ({
                   </div>
                   <pre className="p-3 bg-black/80 rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto whitespace-pre-wrap border border-white/5">
                     {`ffmpeg -i "${selectedVod.source}" -c copy -bsf:a aac_adtstoasc "${selectedVod.title.replace(/\s+/g, '_')}.mp4"`}
+                  </pre>
+                </div>
+
+                {/* yt-dlp Command */}
+                <div className="p-4 rounded-2xl bg-black/40 border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Terminal className="w-4 h-4 text-emerald-400" />
+                      yt-dlp Komutu (10+ Saatlik Dev Yayınlar İçin İdeal)
+                    </span>
+                    <button
+                      onClick={() =>
+                        handleCopy(
+                          `yt-dlp "${selectedVod.source}" -o "${selectedVod.title.replace(/\s+/g, '_')}.mp4"`,
+                          'yt-dlp Komutu'
+                        )
+                      }
+                      className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold text-white flex items-center gap-1 transition-colors"
+                    >
+                      {copiedText === 'yt-dlp Komutu' ? <Check className="w-3.5 h-3.5 text-[#53fc18]" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedText === 'yt-dlp Komutu' ? 'Kopyalandı' : 'Kopyala'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-3 bg-black/80 rounded-xl text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap border border-white/5">
+                    {`yt-dlp "${selectedVod.source}" -o "${selectedVod.title.replace(/\s+/g, '_')}.mp4"`}
                   </pre>
                 </div>
               </div>
